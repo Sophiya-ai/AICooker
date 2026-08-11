@@ -10,11 +10,13 @@ import io
 import logging
 from openai import AsyncOpenAI
 
+from services.ai_client import AIClientError
+
 LOGGER = logging.getLogger(__name__)
 
 
-class OpenAIClientError(RuntimeError):
-    """Единый тип ошибки внешнего API, который ожидают обработчики."""
+class OpenAIClientError(AIClientError):
+    """Ошибка OpenAI; наследуется от общего типа ошибки AI-провайдера."""
 
 
 class OpenAIClient:

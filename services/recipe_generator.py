@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import List
 
+from services.ai_client import AIClient, AIClientError
 from services.recipes.schemas import RecipeData, parse_recipes_payload
 
-from .openai_client import OpenAIClient, OpenAIClientError
-
-# Этот общий контракт повторно используется для всех типов входа. Удвоенные
-# скобки экранируют JSON при последующем вызове str.format.
+# Этот общий контракт повторно используется для всех типов входа. Схема хранится
+# с обычными скобками: при подстановке как значения str.format их экранировать не
+# нужно (format не обрабатывает содержимое уже подставленной строки повторно).
 JSON_INSTRUCTION = """
 Ответ строго в формате JSON без пояснений:
 {
@@ -25,7 +25,7 @@ JSON_INSTRUCTION = """
     }
   ]
 }
-""".strip().replace("{", "{{").replace("}", "}}")
+""".strip()
 
 
 TEXT_PROMPT = """
@@ -80,7 +80,7 @@ class RecipeGenerationError(RuntimeError):
 class RecipeGenerator:
     """Инкапсулирует prompt engineering для трёх сценариев рецепта."""
 
-    def __init__(self, client: OpenAIClient) -> None:
+    def __init__(self, client: AIClient) -> None:
         """Получить уже настроенный API-клиент через внедрение зависимости."""
         self._client = client
 
@@ -139,7 +139,7 @@ class RecipeGenerator:
         """Вызвать text/vision-функцию и унифицировать исключения слоя API."""
         try:
             return await func(*args, **kwargs)
-        except OpenAIClientError as exc:  # pragma: no cover - network failure
+        except AIClientError as exc:  # pragma: no cover - external/local AI failure
             raise RecipeGenerationError(str(exc)) from exc
 
     def _parse(self, raw: str) -> List[RecipeData]:

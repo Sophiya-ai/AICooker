@@ -23,15 +23,18 @@ from handlers import (
     favorites,
     image_ingredients,
     interactive_flow,
+    provider,
     start,
     text_recipe,
     voice_recipe,
     webapp_data,
 )
 from services.interactive_chef import InteractiveChef
+from services.local_ai_client import LocalAIClient
 from services.memory import ConversationMemory
 from services.ngrok_tunnel import NgrokTunnel
 from services.openai_client import OpenAIClient
+from services.provider_registry import ProviderRegistry
 from services.recipe_generator import RecipeGenerator
 from services.storage import RecipeRepository
 
@@ -47,17 +50,33 @@ class DependencyMiddleware(BaseMiddleware):
 
     Такой механизм называется внедрением зависимостей. Например, параметр
     ``recipe_generator`` в handler-функции будет взят из ``self._dependencies``.
-    Сервисы создаются один раз, поэтому обработчики не открывают новые клиенты.
+    Тяжёлые клиенты создаются один раз. Лёгкие RecipeGenerator/InteractiveChef
+    создаются для события с клиентом, выбранным именно в этом Telegram-чате.
     """
 
-    def __init__(self, **dependencies) -> None:
-        """Сохранить произвольный набор именованных зависимостей."""
+    def __init__(self, provider_registry: ProviderRegistry, **dependencies) -> None:
+        """Сохранить registry AI-провайдеров и остальные общие зависимости."""
         super().__init__()
+        self._provider_registry = provider_registry
         self._dependencies = dependencies
 
     async def __call__(self, handler, event, data):
         """Добавить зависимости в контекст события и продолжить цепочку."""
         data.update(self._dependencies)
+        data["provider_registry"] = self._provider_registry
+
+        # У Message chat находится прямо в event.chat, у CallbackQuery — внутри
+        # event.message.chat. Middleware поддерживает оба типа событий.
+        chat = getattr(event, "chat", None)
+        if chat is None:
+            event_message = getattr(event, "message", None)
+            chat = getattr(event_message, "chat", None)
+
+        if chat is not None:
+            ai_client = self._provider_registry.get_client(chat.id)
+            data["ai_client"] = ai_client
+            data["recipe_generator"] = RecipeGenerator(ai_client)
+            data["interactive_chef"] = InteractiveChef(ai_client, max_questions=3)
         return await handler(event, data)
 
 
@@ -66,6 +85,7 @@ async def set_commands(bot: Bot) -> None:
     commands = [
         BotCommand(command="start", description="Запустить бота"),
         BotCommand(command="help", description="Как работает ассистент"),
+        BotCommand(command="provider", description="Выбрать GPT или бесплатный AI"),
         BotCommand(command="chef", description="Интерактивный сбор требований"),
         BotCommand(command="miniapp", description="Открыть мини-приложение"),
     ]
@@ -115,16 +135,33 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
 
-    # Один клиент OpenAI переиспользуется всеми сценариями: текстом, фото и аудио.
-    openai_client = OpenAIClient(
-        api_key=settings.openai_api_key,
-        text_model=settings.openai_text_model,
-        vision_model=settings.openai_vision_model,
-        transcribe_model=settings.openai_transcribe_model,
+    # Бесплатный клиент регистрируется всегда. Модели не загружаются на старте:
+    # Ollama вызывается по HTTP, Whisper лениво создаётся при первом voice.
+    local_client = LocalAIClient(
+        ollama_host=settings.ollama_host,
+        text_model=settings.ollama_text_model,
+        vision_model=settings.ollama_vision_model,
+        whisper_model=settings.whisper_model,
+        whisper_device=settings.whisper_device,
+        whisper_compute_type=settings.whisper_compute_type,
     )
-    recipe_generator = RecipeGenerator(openai_client)
+
+    clients = {"local": local_client}
+    # OpenAI-клиент создаётся только при наличии ключа. Поэтому отсутствие оплаты
+    # и пустой OPENAI_API_KEY больше не мешают запуску бесплатного режима.
+    if settings.openai_api_key:
+        clients["openai"] = OpenAIClient(
+            api_key=settings.openai_api_key,
+            text_model=settings.openai_text_model,
+            vision_model=settings.openai_vision_model,
+            transcribe_model=settings.openai_transcribe_model,
+        )
+
+    provider_registry = ProviderRegistry(
+        clients,
+        default_provider=settings.default_ai_provider,
+    )
     conversation_memory = ConversationMemory(limit=12)
-    interactive_chef = InteractiveChef(openai_client, max_questions=3)
     recipe_repository = RecipeRepository(settings.database_path)
     await recipe_repository.init()
 
@@ -134,17 +171,16 @@ async def main() -> None:
     dp = Dispatcher(storage=storage)
 
     dependency_middleware = DependencyMiddleware(
-        recipe_generator=recipe_generator,
+        provider_registry,
         conversation_memory=conversation_memory,
-        interactive_chef=interactive_chef,
         recipe_repository=recipe_repository,
-        openai_client=openai_client,
     )
 
     # Порядок важен: специализированные сценарии подключаются до общих, а у
     # текстового handler дополнительно есть фильтр default_state.
     for router in (
         start.router,
+        provider.router,
         text_recipe.router,
         voice_recipe.router,
         image_ingredients.router,

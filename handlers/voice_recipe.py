@@ -7,8 +7,8 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.state import default_state
 from aiogram.types import Message
 
+from services.ai_client import AIClient, AIClientError
 from services.memory import ConversationMemory
-from services.openai_client import OpenAIClient, OpenAIClientError
 from services.recipe_generator import RecipeGenerator
 from services.storage import RecipeRepository
 from utils.audio import download_voice
@@ -23,7 +23,7 @@ LOGGER = logging.getLogger(__name__)
 @router.message(F.voice)
 async def handle_voice_recipe(
     message: Message,
-    openai_client: OpenAIClient,
+    ai_client: AIClient,
     recipe_generator: RecipeGenerator,
     conversation_memory: ConversationMemory,
     recipe_repository: RecipeRepository,
@@ -47,8 +47,8 @@ async def handle_voice_recipe(
     filename = f"{message.voice.file_unique_id}.ogg"
 
     try:
-        transcript = await openai_client.transcribe_audio(voice_bytes, filename)
-    except OpenAIClientError:
+        transcript = await ai_client.transcribe_audio(voice_bytes, filename)
+    except AIClientError:
         LOGGER.exception("Voice transcription failed")
         await message.answer("⚠️ Не получилось распознать голос. Запиши сообщение ещё раз.")
         return

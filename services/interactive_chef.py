@@ -5,12 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Sequence
 
+from services.ai_client import AIClient
 from services.recipes.schemas import RecipeData, parse_recipes_payload
 
-from .openai_client import OpenAIClient
-
-# Фигурные скобки удваиваются, поскольку позднее строка вставляется через
-# str.format, где одиночные скобки обозначают переменную-шаблон.
+# JSON_SCHEMA передаётся в str.format как готовое значение. Скобки внутри уже
+# подставляемой строки не интерпретируются повторно, поэтому остаются обычными.
 JSON_SCHEMA = """
 Когда рецепт готов, верни JSON без пояснений:
 {
@@ -26,7 +25,7 @@ JSON_SCHEMA = """
     }
   ]
 }
-""".strip().replace("{", "{{").replace("}", "}}")
+""".strip()
 
 INTERACTIVE_PROMPT = """
 Ты — персональный интерактивный шеф. Ты ведёшь диалог с пользователем, чтобы
@@ -63,7 +62,7 @@ class InteractiveResponse:
 class InteractiveChef:
     """Управляет уточняющим диалогом, выполняемым языковой моделью."""
 
-    def __init__(self, client: OpenAIClient, *, max_questions: int = 3) -> None:
+    def __init__(self, client: AIClient, *, max_questions: int = 3) -> None:
         """Сохранить общий клиент и жёсткий предел уточняющих вопросов."""
         self._client = client
         self._max_questions = max_questions
