@@ -1,0 +1,15 @@
+# Telegram Bot API framework и асинхронная диспетчеризация событий.
+aiogram==3.*
+# HTTP-сервер, который раздаёт файлы Mini App (также используется aiogram).
+aiohttp>=3.9
+# Официальный Python SDK для текста, vision и transcription.
+openai>=1.0.0
+# Чтение локального файла .env.
+python-dotenv
+# Декодирование и преобразование фотографий в JPEG.
+pillow
+# Неблокирующий доступ к SQLite из asyncio-приложения.
+aiosqlite
+# Автоматический временный HTTPS-туннель при локальном запуске Mini App.
+pyngrok>=7.0
+
